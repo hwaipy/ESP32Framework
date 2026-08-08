@@ -1,0 +1,14 @@
+services:
+  ota-server:
+    build: .
+    container_name: hwaipy-ota
+    restart: unless-stopped
+    environment:
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://ota.hwaipy.cn}
+      DATA_DIR: /data
+      MANAGE_USERNAME: ${MANAGE_USERNAME}
+      MANAGE_PASSWORD: ${MANAGE_PASSWORD}
+    volumes:
+      - ./data:/data
+    ports:
+      - "8956:8956"

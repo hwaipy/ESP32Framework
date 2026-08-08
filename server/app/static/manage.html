@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Hwaipy OTA Control</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260808-alias-icon" />
+    <script src="/assets/manage.js?v=20260808-alias-icon" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">HWAIPY DEVICE INFRASTRUCTURE</p>
+        <h1>OTA Control</h1>
+      </div>
+      <div class="topbar-actions">
+        <span id="last-refresh" class="muted">正在连接…</span>
+        <button id="refresh-button" class="button button-secondary" type="button">刷新</button>
+        <button id="open-release-button" class="button button-primary" type="button">发布固件</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="summary-grid" aria-label="设备摘要">
+        <article class="summary-card summary-card-main">
+          <span>设备总数</span>
+          <strong id="count-total">—</strong>
+          <small>已登记的 ESP32 节点</small>
+        </article>
+        <article class="summary-card">
+          <span><i class="dot dot-online"></i>在线</span>
+          <strong id="count-online">—</strong>
+          <small>150 秒内有心跳</small>
+        </article>
+        <article class="summary-card">
+          <span><i class="dot dot-delayed"></i>延迟</span>
+          <strong id="count-delayed">—</strong>
+          <small>一小时内曾连接</small>
+        </article>
+        <article class="summary-card">
+          <span><i class="dot dot-offline"></i>离线</span>
+          <strong id="count-offline">—</strong>
+          <small>超过一小时无心跳</small>
+        </article>
+        <article class="summary-card">
+          <span>待切换版本</span>
+          <strong id="count-pending">—</strong>
+          <small>当前版本与目标不一致</small>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <p class="section-kicker">FLEET</p>
+            <h2>设备</h2>
+          </div>
+          <div class="filters">
+            <label>
+              <span class="sr-only">搜索设备</span>
+              <input id="device-search" type="search" placeholder="搜索名称、型号或 ID" />
+            </label>
+            <label>
+              <span class="sr-only">在线状态</span>
+              <select id="presence-filter">
+                <option value="all">全部状态</option>
+                <option value="online">在线</option>
+                <option value="delayed">延迟</option>
+                <option value="offline">离线</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div id="device-list" class="device-list" aria-live="polite"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <p class="section-kicker">ARCHIVE</p>
+            <h2>历史固件</h2>
+          </div>
+          <p class="panel-note">已发布版本不可覆盖、不可删除</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>板型</th>
+                <th>版本</th>
+                <th>构建</th>
+                <th>大小</th>
+                <th>SHA-256</th>
+                <th>发布时间</th>
+                <th>说明</th>
+              </tr>
+            </thead>
+            <tbody id="release-list"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="release-dialog">
+      <form id="release-form">
+        <div class="dialog-heading">
+          <div>
+            <p class="section-kicker">IMMUTABLE RELEASE</p>
+            <h2>发布固件</h2>
+          </div>
+          <button id="close-release-button" class="icon-button" type="button" aria-label="关闭">×</button>
+        </div>
+        <label>
+          <span>板子型号</span>
+          <input name="model" required pattern="[a-z0-9]+(?:-[a-z0-9]+)*" placeholder="esp32-s3-supermini" />
+        </label>
+        <div class="form-row">
+          <label>
+            <span>版本号</span>
+            <input name="version" required placeholder="0.1.0" />
+          </label>
+          <label>
+            <span>构建号</span>
+            <input name="build" placeholder="20260806.1" />
+          </label>
+        </div>
+        <label>
+          <span>固件 BIN</span>
+          <input name="firmware" type="file" accept=".bin,application/octet-stream" required />
+        </label>
+        <label>
+          <span>发布说明</span>
+          <textarea name="notes" rows="3" placeholder="本次版本的主要变化"></textarea>
+        </label>
+        <p id="release-error" class="form-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button class="button button-secondary" type="button" data-close-dialog>取消</button>
+          <button class="button button-primary" type="submit">上传并发布</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
