@@ -103,7 +103,7 @@ https://ota.hwaipy.cn/manage
   "ota_url": "https://ota.hwaipy.cn/esp32-s3-supermini/2884856b37c8/bin/0.1.1",
     "firmware_size": 895344,
     "firmware_sha256": "bebdf24de3a6272e3961f4cee80ef60f2fa506b09d47bc0a128879f4a3af2865",
-  "heartbeat_interval": 60
+  "heartbeat_interval": 20
 }
 ```
 

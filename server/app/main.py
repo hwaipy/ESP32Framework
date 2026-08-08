@@ -38,6 +38,7 @@ from .versioning import (
 STATIC_DIR = Path(__file__).parent / "static"
 BUILD_PATTERN = re.compile(r"^[0-9A-Za-z._-]{1,64}$")
 STATUS_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+HEARTBEAT_INTERVAL_SECONDS = 20
 
 
 @asynccontextmanager
@@ -226,7 +227,7 @@ def heartbeat(
         "ota_url": ota_url,
         "firmware_size": firmware_size,
         "firmware_sha256": firmware_sha256,
-        "heartbeat_interval": 60,
+        "heartbeat_interval": HEARTBEAT_INTERVAL_SECONDS,
     }
 
 

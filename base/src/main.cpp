@@ -22,6 +22,22 @@ SET_LOOP_TASK_STACK_SIZE(16384);
 
 namespace {
 
+#ifndef HWAIPY_FIRMWARE_NAME
+#define HWAIPY_FIRMWARE_NAME "Hwaipy ESP32 OTA base"
+#endif
+
+#ifndef HWAIPY_FIRMWARE_VERSION
+#define HWAIPY_FIRMWARE_VERSION "0.2.0"
+#endif
+
+#ifndef HWAIPY_FIRMWARE_BUILD
+#define HWAIPY_FIRMWARE_BUILD "20260808.1"
+#endif
+
+#ifndef HWAIPY_APP_SETUP
+#define HWAIPY_APP_SETUP() ((void)0)
+#endif
+
 #if CONFIG_IDF_TARGET_ESP32S3
 constexpr char DEVICE_MODEL[] = "esp32-s3-supermini";
 #define HWAIPY_BOARD_HAS_PSRAM 1
@@ -35,8 +51,9 @@ constexpr char DEVICE_MODEL[] = "esp32-c6-supermini";
 #error "Unsupported ESP32 target. Add its model and memory policy first."
 #endif
 
-constexpr char FIRMWARE_VERSION[] = "0.2.0";
-constexpr char FIRMWARE_BUILD[] = "20260808.1";
+constexpr char FIRMWARE_NAME[] = HWAIPY_FIRMWARE_NAME;
+constexpr char FIRMWARE_VERSION[] = HWAIPY_FIRMWARE_VERSION;
+constexpr char FIRMWARE_BUILD[] = HWAIPY_FIRMWARE_BUILD;
 constexpr char OTA_BASE_URL[] = "https://ota.hwaipy.cn";
 constexpr uint32_t DEFAULT_HEARTBEAT_INTERVAL_MS = 60000;
 constexpr uint32_t RETRY_HEARTBEAT_INTERVAL_MS = 15000;
@@ -128,7 +145,7 @@ bool boardSelfTest() {
 void printHardwareReport() {
   Serial.println();
   Serial.println("========================================");
-  Serial.println("Hwaipy ESP32 OTA base");
+  Serial.println(FIRMWARE_NAME);
   Serial.println("========================================");
   Serial.printf("Model             : %s\n", DEVICE_MODEL);
   Serial.printf("Device ID         : %s\n", deviceId.c_str());
@@ -566,6 +583,7 @@ void setup() {
   confirmRunningImage();
   loadOtaResult();
   printHardwareReport();
+  HWAIPY_APP_SETUP();
   nextHeartbeatAt = millis();
 }
 

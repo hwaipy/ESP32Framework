@@ -1,4 +1,5 @@
 const state = { snapshot: null };
+const REFRESH_INTERVAL_MS = 3_000;
 
 const $ = (selector) => document.querySelector(selector);
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({
@@ -27,7 +28,7 @@ function toast(message) {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, options);
+  const response = await fetch(path, { cache: "no-store", ...options });
   if (!response.ok) {
     let message = `请求失败 (${response.status})`;
     try {
@@ -258,4 +259,4 @@ $("#release-form").addEventListener("submit", async (event) => {
 refresh();
 window.setInterval(() => {
   if (!document.activeElement?.matches(".alias-input")) refresh();
-}, 30_000);
+}, REFRESH_INTERVAL_MS);

@@ -58,6 +58,7 @@ def test_complete_update_and_downgrade_flow():
         assert first_heartbeat.status_code == 200
         assert first_heartbeat.json()["action"] == "none"
         assert first_heartbeat.json()["ota_url"] is None
+        assert first_heartbeat.json()["heartbeat_interval"] == 20
 
         unauthorized = client.get("/api/manage/snapshot")
         assert unauthorized.status_code == 401
