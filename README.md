@@ -46,6 +46,28 @@ cd base
 /Users/hwaipy/Documents/PlatformIO/ESP32Framework/base/build/esp32-c6-supermini/firmware.bin
 ```
 
+### 从 GitHub 一行烧写 factory 固件
+
+GitHub Release 中的 `factory.bin` 是包含 bootloader、分区表、OTA 数据和应用程序的
+完整镜像，适合新板首次烧写或整片重刷。以下命令适用于 macOS/Linux，会依次安装
+烧写工具、下载指定版本、从地址 `0x0` 写入唯一连接的 ESP32 USB 设备，并通过串口
+保存 Wi-Fi 凭据。执行前把 Wi-Fi 占位符替换为实际值：
+
+```bash
+VERSION=0.2.0; BOARD=esp32-s3-supermini; CHIP=esp32s3; export WIFI_SSID='YOUR_WIFI_SSID' WIFI_PASSWORD='YOUR_WIFI_PASSWORD'; curl -LsSf https://astral.sh/uv/install.sh | sh && curl -fL "https://github.com/hwaipy/ESP32Framework/releases/download/base-v${VERSION}/ESP32Framework-base-${VERSION}-${BOARD}-factory.bin" -o /tmp/esp32-factory.bin && ~/.local/bin/uvx --from esptool==5.3.0 esptool --chip "$CHIP" write-flash 0x0 /tmp/esp32-factory.bin && sleep 4 && ~/.local/bin/uv run --with pyserial python -c 'import json,os,time,serial; from serial.tools import list_ports; ports=[p.device for p in list_ports.comports() if p.vid is not None or any(x in p.device.lower() for x in ("usbmodem","usbserial","ttyacm","ttyusb"))]; assert ports,"未找到 ESP32 串口"; s=serial.Serial(ports[0],115200,timeout=0.2,write_timeout=2); time.sleep(3); s.reset_input_buffer(); command="wifi "+json.dumps({"ssid":os.environ["WIFI_SSID"],"password":os.environ["WIFI_PASSWORD"]},ensure_ascii=False)+"\n"; s.write(command.encode("utf-8")); s.flush(); time.sleep(6); out=s.read_all(); print(out.decode("utf-8","replace")); assert b"credentials saved" in out,"Wi-Fi 配置未确认保存，请重新执行串口配置"'
+```
+
+上例用于 ESP32-S3 Super Mini。其他板型只需替换命令开头的参数：
+
+```text
+ESP32-C3 Super Mini: BOARD=esp32-c3-supermini; CHIP=esp32c3
+ESP32-C6 Super Mini: BOARD=esp32-c6-supermini; CHIP=esp32c6
+```
+
+三种芯片的固件不能交叉烧写。计算机同时连接多个 USB 串口设备时，应先断开无关
+设备，避免自动选择错误串口。Wi-Fi 密码会以明文出现在执行命令的终端历史记录中。
+如果开发板无法自动进入烧录模式，请按住 `BOOT`、短按 `RESET`，然后重新执行命令。
+
 首次 USB 刷写必须指定实际板型，例如 S3：
 
 ```bash
@@ -74,7 +96,7 @@ S3 Super Mini 会检测预期的 2 MB PSRAM；C3、C6 没有 PSRAM 属于正常�
 - 已验证：HTTPS 心跳、精确版本分配、SHA-256 校验、OTA 升级、主动降级、Wi-Fi NVS 持久化
 - 线上历史版本：`0.1.0`、`0.1.1`、`0.1.2`；其中 `0.1.0` 仅作历史保留，不应再次分配
 
-本地 `0.2.0` 目前只完成三板型编译验证，尚未发布或分配给设备。
+`0.2.0` 已完成三板型编译验证，并发布为 GitHub Release `base-v0.2.0`。
 
 ## SignalGenerator 固件
 

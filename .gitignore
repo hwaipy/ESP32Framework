@@ -4,3 +4,6 @@ venv/
 __pycache__/
 .pytest_cache/
 .coverage
+
+# Local flashing instructions contain Wi-Fi credentials. Never commit this file.
+/burn.md
