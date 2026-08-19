@@ -53,10 +53,13 @@ https://ota.hwaipy.cn/esp32-s3-supermini/2884856b37c8/hb
 | 参数 | 必填 | 含义 |
 | --- | --- | --- |
 | `v` | 是 | 当前语义版本号，例如 `0.1.2` |
+| `base` | 否 | 编译进当前固件的 base 源码版本，例如 `0.4.0` |
 | `build` | 否 | 构建编号 |
 | `uptime` | 否 | 启动至今的秒数 |
 | `status` | 否 | 运行状态，默认 `ok` |
 | `rssi` | 否 | Wi-Fi RSSI，单位 dBm |
+| `wifi_ssid` | 否 | 当前连接的 Wi-Fi SSID，UTF-8 URL 编码，最长 32 个字符 |
+| `local_ip` | 否 | 板卡在当前 Wi-Fi 网络中的本地 IP 地址 |
 | `heap` | 否 | 当前空闲堆字节数 |
 | `reset` | 否 | 最近一次复位原因 |
 | `ota` | 否 | OTA 状态，默认 `idle` |

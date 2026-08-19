@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -27,10 +28,13 @@ def heartbeat(client: TestClient, version: str = "0.1.0"):
         f"/{MODEL}/{DEVICE_ID}/hb",
         params={
             "v": version,
+            "base": "0.4.0",
             "build": "20260806.1",
             "uptime": 120,
             "status": "ok",
             "rssi": -48,
+            "wifi_ssid": "实验室 Wi-Fi & IoT",
+            "local_ip": "192.168.10.42",
             "heap": 372312,
             "reset": "power-on",
             "ota": "idle",
@@ -109,6 +113,54 @@ def test_complete_update_and_downgrade_flow():
         assert snapshot.json()["counts"]["total"] == 1
         assert snapshot.json()["counts"]["pending"] == 1
         assert len(snapshot.json()["releases"]) == 2
+        assert snapshot.json()["devices"][0]["wifi_ssid"] == "实验室 Wi-Fi & IoT"
+        assert snapshot.json()["devices"][0]["local_ip"] == "192.168.10.42"
+        assert snapshot.json()["devices"][0]["base_version"] == "0.4.0"
+
+
+def test_per_device_debug_ota_stays_outside_release_library():
+    firmware = b"temporary recorder debug firmware"
+    version = "recorder_debug_0.0.1"
+    target_dir = TEST_DATA_DIR / "debug" / MODEL / DEVICE_ID
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "firmware.bin").write_bytes(firmware)
+    (target_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "version": version,
+                "build": "debug-1",
+                "filename": "firmware.bin",
+                "firmware_size": len(firmware),
+                "firmware_sha256": hashlib.sha256(firmware).hexdigest(),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        with TestClient(app) as client:
+            releases_before = client.get("/api/manage/snapshot", auth=AUTH).json()["releases"]
+            response = heartbeat(client, "signal_generator_0.1.0")
+            assert response.status_code == 200
+            body = response.json()
+            assert body["action"] == "downgrade"
+            assert body["target_version"] == version
+            assert body["ota_url"].endswith(f"/{MODEL}/{DEVICE_ID}/debug-bin/{version}")
+            assert body["firmware_size"] == len(firmware)
+            assert body["firmware_sha256"] == hashlib.sha256(firmware).hexdigest()
+
+            download = client.get(f"/{MODEL}/{DEVICE_ID}/debug-bin/{version}")
+            assert download.status_code == 200
+            assert download.content == firmware
+            assert download.headers["cache-control"] == "no-store"
+
+            snapshot = client.get("/api/manage/snapshot", auth=AUTH)
+            assert snapshot.status_code == 200
+            assert snapshot.json()["releases"] == releases_before
+            assert version not in {item["version"] for item in releases_before}
+    finally:
+        for path in (target_dir / "manifest.json", target_dir / "firmware.bin"):
+            path.unlink(missing_ok=True)
 
 
 def test_input_validation_and_assignment_guards():
@@ -118,6 +170,12 @@ def test_input_validation_and_assignment_guards():
 
         invalid_version = client.get(f"/{MODEL}/{DEVICE_ID}/hb", params={"v": "latest"})
         assert invalid_version.status_code == 422
+
+        invalid_local_ip = client.get(
+            f"/{MODEL}/{DEVICE_ID}/hb",
+            params={"v": "0.1.0", "local_ip": "not-an-ip"},
+        )
+        assert invalid_local_ip.status_code == 422
 
         heartbeat(client)
         missing_release = client.put(
@@ -136,12 +194,15 @@ def test_device_alias_is_persistent_and_can_be_cleared():
         manage_page = client.get("/manage", auth=AUTH)
         assert manage_page.status_code == 200
         assert manage_page.headers["cache-control"] == "no-store"
-        assert "/assets/manage.js?v=20260808-alias-icon" in manage_page.text
+        assert "/assets/manage.js?v=20260819-local-ip" in manage_page.text
 
-        manage_script = client.get("/assets/manage.js?v=20260808-alias-icon")
+        manage_script = client.get("/assets/manage.js?v=20260819-local-ip")
         assert manage_script.status_code == 200
         assert 'class="alias-icon-button edit-alias"' in manage_script.text
         assert "设置设备别名" in manage_script.text
+        assert "device.wifi_ssid" in manage_script.text
+        assert "device.local_ip" in manage_script.text
+        assert "device.base_version" in manage_script.text
 
         assert heartbeat(client).status_code == 200
 

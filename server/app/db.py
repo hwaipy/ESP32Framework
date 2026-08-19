@@ -16,11 +16,14 @@ CREATE TABLE IF NOT EXISTS devices (
     name TEXT,
     current_version TEXT NOT NULL,
     current_build TEXT,
+    base_version TEXT,
     target_version TEXT,
     status TEXT NOT NULL,
     ota_status TEXT NOT NULL,
     uptime_seconds INTEGER,
     rssi INTEGER,
+    wifi_ssid TEXT,
+    local_ip TEXT,
     free_heap INTEGER,
     reset_reason TEXT,
     remote_ip TEXT,
@@ -48,10 +51,13 @@ CREATE TABLE IF NOT EXISTS heartbeats (
     device_id TEXT NOT NULL,
     version TEXT NOT NULL,
     build TEXT,
+    base_version TEXT,
     status TEXT NOT NULL,
     ota_status TEXT NOT NULL,
     uptime_seconds INTEGER,
     rssi INTEGER,
+    wifi_ssid TEXT,
+    local_ip TEXT,
     free_heap INTEGER,
     reset_reason TEXT,
     remote_ip TEXT,
@@ -79,6 +85,13 @@ def init_db(database_path: Path | None = None) -> None:
     settings.firmware_dir.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as connection:
         connection.executescript(SCHEMA)
+        for table in ("devices", "heartbeats"):
+            columns = {
+                row[1] for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            for column in ("wifi_ssid", "local_ip", "base_version"):
+                if column not in columns:
+                    connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
         connection.execute("PRAGMA optimize")
 
 
@@ -97,4 +110,3 @@ def connect(database_path: Path | None = None) -> Iterator[sqlite3.Connection]:
         raise
     finally:
         connection.close()
-

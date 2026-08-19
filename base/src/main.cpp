@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <ctime>
 
 #include "ota_root_ca.h"
@@ -26,12 +27,14 @@ namespace {
 #define HWAIPY_FIRMWARE_NAME "Hwaipy ESP32 OTA base"
 #endif
 
+#define HWAIPY_BASE_VERSION "0.4.0"
+
 #ifndef HWAIPY_FIRMWARE_VERSION
-#define HWAIPY_FIRMWARE_VERSION "0.2.0"
+#define HWAIPY_FIRMWARE_VERSION HWAIPY_BASE_VERSION
 #endif
 
 #ifndef HWAIPY_FIRMWARE_BUILD
-#define HWAIPY_FIRMWARE_BUILD "20260808.1"
+#define HWAIPY_FIRMWARE_BUILD "20260819.1"
 #endif
 
 #ifndef HWAIPY_APP_SETUP
@@ -54,12 +57,19 @@ constexpr char DEVICE_MODEL[] = "esp32-c6-supermini";
 constexpr char FIRMWARE_NAME[] = HWAIPY_FIRMWARE_NAME;
 constexpr char FIRMWARE_VERSION[] = HWAIPY_FIRMWARE_VERSION;
 constexpr char FIRMWARE_BUILD[] = HWAIPY_FIRMWARE_BUILD;
+constexpr char BASE_VERSION[] = HWAIPY_BASE_VERSION;
 constexpr char OTA_BASE_URL[] = "https://ota.hwaipy.cn";
 constexpr uint32_t DEFAULT_HEARTBEAT_INTERVAL_MS = 60000;
 constexpr uint32_t RETRY_HEARTBEAT_INTERVAL_MS = 15000;
 constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 20000;
 constexpr uint32_t HTTP_TIMEOUT_MS = 20000;
 constexpr uint32_t OTA_READ_TIMEOUT_MS = 30000;
+constexpr size_t MAX_WIFI_NETWORKS = 8;
+
+struct NetworkCredential {
+  String ssid;
+  String password;
+};
 
 String deviceId;
 String otaStatus = "idle";
@@ -150,6 +160,7 @@ void printHardwareReport() {
   Serial.printf("Model             : %s\n", DEVICE_MODEL);
   Serial.printf("Device ID         : %s\n", deviceId.c_str());
   Serial.printf("Firmware          : %s (%s)\n", FIRMWARE_VERSION, FIRMWARE_BUILD);
+  Serial.printf("Base              : %s\n", BASE_VERSION);
   Serial.printf("Chip              : %s, %u cores, %u MHz\n", ESP.getChipModel(),
                 ESP.getChipCores(), ESP.getCpuFreqMHz());
   Serial.printf("Flash             : %u bytes, %u MHz\n", ESP.getFlashChipSize(),
@@ -213,26 +224,98 @@ void confirmRunningImage() {
   }
 }
 
-bool loadNetworkCredentials(String &ssid, String &password) {
+bool loadNetworkCredentials(NetworkCredential *networks, size_t &networkCount) {
+  networkCount = 0;
   Preferences preferences;
   if (!preferences.begin("hwaipy-net", true)) {
     return false;
   }
-  ssid = preferences.getString("ssid", "");
-  password = preferences.getString("password", "");
+
+  const String encodedNetworks = preferences.isKey("networks")
+                                     ? preferences.getString("networks", "")
+                                     : String();
+  if (!encodedNetworks.isEmpty()) {
+    JsonDocument document;
+    if (!deserializeJson(document, encodedNetworks)) {
+      const JsonArrayConst entries = document.as<JsonArrayConst>();
+      for (JsonObjectConst entry : entries) {
+        const String ssid = entry["ssid"].as<String>();
+        const String password = entry["password"].as<String>();
+        if (ssid.isEmpty() || ssid.length() > 32 || password.length() > 63 ||
+            networkCount >= MAX_WIFI_NETWORKS) {
+          continue;
+        }
+        networks[networkCount++] = {ssid, password};
+      }
+    }
+  }
+
+  // Versions before 0.3.0 stored one network in these two keys. Keep reading
+  // them until a configuration change migrates the data to the ordered list.
+  if (networkCount == 0) {
+    const String legacySsid =
+        preferences.isKey("ssid") ? preferences.getString("ssid", "") : String();
+    const String legacyPassword = preferences.isKey("password")
+                                      ? preferences.getString("password", "")
+                                      : String();
+    if (!legacySsid.isEmpty()) {
+      networks[networkCount++] = {legacySsid, legacyPassword};
+    }
+  }
   preferences.end();
-  return !ssid.isEmpty();
+  return networkCount > 0;
 }
 
-bool saveNetworkCredentials(const String &ssid, const String &password) {
+bool saveNetworkCredentials(const NetworkCredential *networks, size_t networkCount) {
+  JsonDocument document;
+  JsonArray entries = document.to<JsonArray>();
+  for (size_t index = 0; index < networkCount; ++index) {
+    JsonObject entry = entries.add<JsonObject>();
+    entry["ssid"] = networks[index].ssid;
+    entry["password"] = networks[index].password;
+  }
+  String encodedNetworks;
+  serializeJson(document, encodedNetworks);
+
   Preferences preferences;
   if (!preferences.begin("hwaipy-net", false)) {
     return false;
   }
-  const bool saved = preferences.putString("ssid", ssid) > 0;
-  preferences.putString("password", password);
+  const bool saved = preferences.putString("networks", encodedNetworks) > 0;
+  if (saved) {
+    if (preferences.isKey("ssid")) {
+      preferences.remove("ssid");
+    }
+    if (preferences.isKey("password")) {
+      preferences.remove("password");
+    }
+    if (preferences.isKey("last")) {
+      preferences.remove("last");
+    }
+  }
   preferences.end();
   return saved;
+}
+
+void rememberSuccessfulNetwork(size_t index) {
+  Preferences preferences;
+  if (!preferences.begin("hwaipy-net", false)) {
+    return;
+  }
+  if (!preferences.isKey("last") || preferences.getUChar("last") != index) {
+    preferences.putUChar("last", static_cast<uint8_t>(index));
+  }
+  preferences.end();
+}
+
+int lastSuccessfulNetwork() {
+  Preferences preferences;
+  if (!preferences.begin("hwaipy-net", true)) {
+    return -1;
+  }
+  const int index = preferences.isKey("last") ? preferences.getUChar("last") : -1;
+  preferences.end();
+  return index;
 }
 
 void clearNetworkCredentials() {
@@ -241,38 +324,50 @@ void clearNetworkCredentials() {
     preferences.clear();
     preferences.end();
   }
-  WiFi.disconnect(true, true);
+  if (WiFi.getMode() != WIFI_MODE_NULL) {
+    WiFi.disconnect(true, true);
+  }
 }
 
 bool connectWifi() {
   if (WiFi.status() == WL_CONNECTED) {
     return true;
   }
-  String ssid;
-  String password;
-  if (!loadNetworkCredentials(ssid, password)) {
+  NetworkCredential networks[MAX_WIFI_NETWORKS];
+  size_t networkCount = 0;
+  if (!loadNetworkCredentials(networks, networkCount)) {
     Serial.println("Wi-Fi is not configured.");
     Serial.println("Send: wifi {\"ssid\":\"YOUR_SSID\",\"password\":\"YOUR_PASSWORD\"}");
     return false;
   }
 
   WiFi.mode(WIFI_STA);
-  WiFi.setAutoReconnect(true);
-  WiFi.begin(ssid.c_str(), password.c_str());
-  Serial.printf("Connecting to Wi-Fi %s", ssid.c_str());
-  const uint32_t startedAt = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startedAt < WIFI_CONNECT_TIMEOUT_MS) {
-    delay(300);
-    Serial.print('.');
+  WiFi.setAutoReconnect(false);
+  for (size_t index = 0; index < networkCount; ++index) {
+    WiFi.disconnect(false, false);
+    delay(100);
+    WiFi.begin(networks[index].ssid.c_str(), networks[index].password.c_str());
+    Serial.printf("Connecting to Wi-Fi [%u/%u] %s", static_cast<unsigned>(index + 1),
+                  static_cast<unsigned>(networkCount), networks[index].ssid.c_str());
+    const uint32_t startedAt = millis();
+    while (WiFi.status() != WL_CONNECTED &&
+           millis() - startedAt < WIFI_CONNECT_TIMEOUT_MS) {
+      delay(300);
+      Serial.print('.');
+    }
+    Serial.println();
+    if (WiFi.status() == WL_CONNECTED) {
+      rememberSuccessfulNetwork(index);
+      WiFi.setAutoReconnect(true);
+      Serial.printf("Wi-Fi connected: %s, RSSI %d dBm\n",
+                    WiFi.localIP().toString().c_str(), WiFi.RSSI());
+      return true;
+    }
+    Serial.printf("Unable to connect to %s.\n", networks[index].ssid.c_str());
   }
-  Serial.println();
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("Wi-Fi connection failed.");
-    return false;
-  }
-  Serial.printf("Wi-Fi connected: %s, RSSI %d dBm\n", WiFi.localIP().toString().c_str(),
-                WiFi.RSSI());
-  return true;
+  WiFi.disconnect(false, false);
+  Serial.println("All configured Wi-Fi networks failed.");
+  return false;
 }
 
 bool synchronizeClock() {
@@ -291,9 +386,31 @@ bool synchronizeClock() {
   return time(nullptr) > 1700000000;
 }
 
+String urlEncodeQueryValue(const String &value) {
+  static constexpr char HEX_DIGITS[] = "0123456789ABCDEF";
+  String encoded;
+  encoded.reserve(value.length() * 3);
+  for (size_t index = 0; index < value.length(); ++index) {
+    const uint8_t byte = static_cast<uint8_t>(value[index]);
+    const bool unreserved =
+        (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z') ||
+        (byte >= '0' && byte <= '9') || byte == '-' || byte == '.' || byte == '_' ||
+        byte == '~';
+    if (unreserved) {
+      encoded += static_cast<char>(byte);
+    } else {
+      encoded += '%';
+      encoded += HEX_DIGITS[(byte >> 4) & 0x0F];
+      encoded += HEX_DIGITS[byte & 0x0F];
+    }
+  }
+  return encoded;
+}
+
 String heartbeatUrl() {
   String url = String(OTA_BASE_URL) + "/" + DEVICE_MODEL + "/" + deviceId + "/hb";
   url += "?v=" + String(FIRMWARE_VERSION);
+  url += "&base=" + String(BASE_VERSION);
   url += "&build=" + String(FIRMWARE_BUILD);
   url += "&uptime=" + String(millis() / 1000U);
   url += "&status=ok";
@@ -301,6 +418,8 @@ String heartbeatUrl() {
   url += "&heap=" + String(ESP.getFreeHeap());
   url += "&reset=" + String(resetReasonName(esp_reset_reason()));
   url += "&ota=" + otaStatus;
+  url += "&wifi_ssid=" + urlEncodeQueryValue(WiFi.SSID());
+  url += "&local_ip=" + WiFi.localIP().toString();
   return url;
 }
 
@@ -531,12 +650,72 @@ void handleSerialCommand(String command) {
   }
   if (command == "wifi clear") {
     clearNetworkCredentials();
-    Serial.println("Wi-Fi credentials cleared.");
+    Serial.println("All Wi-Fi credentials cleared.");
     return;
   }
-  if (command.startsWith("wifi ")) {
+  if (command == "wifi list") {
+    NetworkCredential networks[MAX_WIFI_NETWORKS];
+    size_t networkCount = 0;
+    if (!loadNetworkCredentials(networks, networkCount)) {
+      Serial.println("No Wi-Fi networks configured.");
+      return;
+    }
+    const int lastSuccessful = lastSuccessfulNetwork();
+    Serial.printf("Configured Wi-Fi networks (%u):\n", static_cast<unsigned>(networkCount));
+    for (size_t index = 0; index < networkCount; ++index) {
+      Serial.printf("  [%u] %s%s%s\n", static_cast<unsigned>(index),
+                    networks[index].ssid.c_str(),
+                    static_cast<int>(index) == lastSuccessful ? " (last successful)" : "",
+                    WiFi.status() == WL_CONNECTED && WiFi.SSID() == networks[index].ssid
+                        ? " (connected)"
+                        : "");
+    }
+    return;
+  }
+  if (command.startsWith("wifi remove ")) {
+    const String indexText = command.substring(12);
+    char *end = nullptr;
+    const long requestedIndex = strtol(indexText.c_str(), &end, 10);
+    if (indexText.isEmpty() || end == indexText.c_str() || *end != '\0') {
+      Serial.println("Usage: wifi remove INDEX");
+      return;
+    }
+    NetworkCredential networks[MAX_WIFI_NETWORKS];
+    size_t networkCount = 0;
+    if (!loadNetworkCredentials(networks, networkCount) || requestedIndex < 0 ||
+        static_cast<size_t>(requestedIndex) >= networkCount) {
+      Serial.println("Wi-Fi network index is invalid.");
+      return;
+    }
+    const String removedSsid = networks[requestedIndex].ssid;
+    for (size_t index = static_cast<size_t>(requestedIndex); index + 1 < networkCount;
+         ++index) {
+      networks[index] = networks[index + 1];
+    }
+    --networkCount;
+    bool saved = false;
+    if (networkCount == 0) {
+      clearNetworkCredentials();
+      saved = true;
+    } else {
+      saved = saveNetworkCredentials(networks, networkCount);
+    }
+    if (!saved) {
+      Serial.println("Unable to save Wi-Fi credentials.");
+      return;
+    }
+    if (WiFi.getMode() != WIFI_MODE_NULL) {
+      WiFi.disconnect(true, false);
+    }
+    nextHeartbeatAt = millis();
+    Serial.printf("Wi-Fi network removed: %s.\n", removedSsid.c_str());
+    return;
+  }
+  const bool addCommand = command.startsWith("wifi add ");
+  if (addCommand || command.startsWith("wifi ")) {
     JsonDocument document;
-    const DeserializationError error = deserializeJson(document, command.substring(5));
+    const DeserializationError error =
+        deserializeJson(document, command.substring(addCommand ? 9 : 5));
     if (error) {
       Serial.printf("Wi-Fi command JSON error: %s\n", error.c_str());
       return;
@@ -547,16 +726,40 @@ void handleSerialCommand(String command) {
       Serial.println("Wi-Fi SSID/password length is invalid.");
       return;
     }
-    if (!saveNetworkCredentials(ssid, password)) {
+    NetworkCredential networks[MAX_WIFI_NETWORKS];
+    size_t networkCount = 0;
+    loadNetworkCredentials(networks, networkCount);
+    size_t targetIndex = networkCount;
+    for (size_t index = 0; index < networkCount; ++index) {
+      if (networks[index].ssid == ssid) {
+        targetIndex = index;
+        break;
+      }
+    }
+    if (targetIndex == networkCount) {
+      if (networkCount >= MAX_WIFI_NETWORKS) {
+        Serial.printf("Wi-Fi network limit reached (%u).\n",
+                      static_cast<unsigned>(MAX_WIFI_NETWORKS));
+        return;
+      }
+      ++networkCount;
+    }
+    networks[targetIndex] = {ssid, password};
+    if (!saveNetworkCredentials(networks, networkCount)) {
       Serial.println("Unable to save Wi-Fi credentials.");
       return;
     }
-    WiFi.disconnect(true, false);
+    if (WiFi.getMode() != WIFI_MODE_NULL) {
+      WiFi.disconnect(true, false);
+    }
     nextHeartbeatAt = millis();
-    Serial.printf("Wi-Fi credentials saved for %s.\n", ssid.c_str());
+    Serial.printf("Wi-Fi credentials saved for %s at index %u.\n", ssid.c_str(),
+                  static_cast<unsigned>(targetIndex));
     return;
   }
-  Serial.println("Commands: info | heartbeat | wifi clear | wifi {JSON}");
+  Serial.println(
+      "Commands: info | heartbeat | wifi list | wifi clear | wifi remove INDEX | "
+      "wifi [add] {JSON}");
 }
 
 void processSerial() {
