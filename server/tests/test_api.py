@@ -28,7 +28,7 @@ def heartbeat(client: TestClient, version: str = "0.1.0"):
         f"/{MODEL}/{DEVICE_ID}/hb",
         params={
             "v": version,
-            "base": "0.4.0",
+            "base": "0.4.1",
             "build": "20260806.1",
             "uptime": 120,
             "status": "ok",
@@ -115,7 +115,7 @@ def test_complete_update_and_downgrade_flow():
         assert len(snapshot.json()["releases"]) == 2
         assert snapshot.json()["devices"][0]["wifi_ssid"] == "实验室 Wi-Fi & IoT"
         assert snapshot.json()["devices"][0]["local_ip"] == "192.168.10.42"
-        assert snapshot.json()["devices"][0]["base_version"] == "0.4.0"
+        assert snapshot.json()["devices"][0]["base_version"] == "0.4.1"
 
 
 def test_per_device_debug_ota_stays_outside_release_library():

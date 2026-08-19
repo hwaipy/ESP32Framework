@@ -27,14 +27,14 @@ namespace {
 #define HWAIPY_FIRMWARE_NAME "Hwaipy ESP32 OTA base"
 #endif
 
-#define HWAIPY_BASE_VERSION "0.4.0"
+#define HWAIPY_BASE_VERSION "0.4.1"
 
 #ifndef HWAIPY_FIRMWARE_VERSION
 #define HWAIPY_FIRMWARE_VERSION HWAIPY_BASE_VERSION
 #endif
 
 #ifndef HWAIPY_FIRMWARE_BUILD
-#define HWAIPY_FIRMWARE_BUILD "20260819.1"
+#define HWAIPY_FIRMWARE_BUILD "20260819.2"
 #endif
 
 #ifndef HWAIPY_APP_SETUP
@@ -521,6 +521,7 @@ bool installFirmware(const String &url, const String &targetVersion,
   WiFiClient *stream = request.getStreamPtr();
   uint8_t buffer[4096];
   size_t received = 0;
+  unsigned lastReportedProgress = 0;
   uint32_t lastDataAt = millis();
   bool writeOk = true;
   Serial.printf("Installing %s (%u bytes)\n", targetVersion.c_str(),
@@ -544,8 +545,12 @@ bool installFirmware(const String &url, const String &targetVersion,
       }
       received += count;
       lastDataAt = millis();
-      Serial.printf("\rOTA progress: %u%%",
-                    static_cast<unsigned>((received * 100U) / expectedSize));
+      const unsigned progress =
+          static_cast<unsigned>((received * 100U) / expectedSize);
+      if (progress == 100U || progress >= lastReportedProgress + 5U) {
+        Serial.printf("\rOTA progress: %u%%", progress);
+        lastReportedProgress = progress;
+      }
     } else {
       if (!request.connected() || millis() - lastDataAt > OTA_READ_TIMEOUT_MS) {
         writeOk = false;
@@ -781,6 +786,11 @@ void processSerial() {
 
 void setup() {
   Serial.begin(115200);
+#if ARDUINO_USB_CDC_ON_BOOT && ARDUINO_USB_MODE
+  // USB Serial/JTAG output must never hold up networking when no terminal is
+  // consuming the CDC stream. Diagnostics are best-effort only.
+  Serial.setTxTimeoutMs(0);
+#endif
   delay(1500);
   deviceId = factoryDeviceId();
   confirmRunningImage();

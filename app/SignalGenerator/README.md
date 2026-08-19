@@ -1,7 +1,7 @@
 # SignalGenerator
 
 `SignalGenerator` 是从仓库 `base` 固件派生的信号发生器应用，当前版本为
-`signal_generator_0.1.1`，构建号为 `20260819.1`，内嵌 base `0.4.0`。
+`signal_generator_0.1.1`，构建号为 `20260819.1`，内嵌 base `0.4.1`。
 
 当前版本复用 base 提供的三板型支持、串口配置、Wi-Fi NVS、HTTPS 心跳、
 SHA-256 校验和 OTA 升降级能力。
