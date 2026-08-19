@@ -114,7 +114,7 @@ S3 Super Mini 会检测预期的 2 MB PSRAM；C3、C6 没有 PSRAM 属于正常�
 
 ## SignalGenerator 固件
 
-当前应用版本：`signal_generator_0.1.1`，构建号：`20260819.1`，内嵌 base
+当前应用版本：`signal_generator_0.1.2`，构建号：`20260819.2`，内嵌 base
 `0.4.1`。
 
 ```bash
