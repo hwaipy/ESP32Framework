@@ -1,4 +1,5 @@
 const state = { snapshot: null };
+const REFRESH_INTERVAL_MS = 3_000;
 
 const $ = (selector) => document.querySelector(selector);
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({
@@ -27,7 +28,7 @@ function toast(message) {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, options);
+  const response = await fetch(path, { cache: "no-store", ...options });
   if (!response.ok) {
     let message = `请求失败 (${response.status})`;
     try {
@@ -53,7 +54,7 @@ function renderDevices() {
   const search = $("#device-search").value.trim().toLowerCase();
   const presence = $("#presence-filter").value;
   const devices = state.snapshot.devices.filter((device) => {
-    const haystack = `${device.name || ""} ${device.model} ${device.device_id}`.toLowerCase();
+    const haystack = `${device.name || ""} ${device.model} ${device.device_id} ${device.wifi_ssid || ""} ${device.local_ip || ""}`.toLowerCase();
     return (!search || haystack.includes(search)) && (presence === "all" || device.presence === presence);
   });
 
@@ -97,7 +98,7 @@ function renderDevices() {
       </div>
       <div class="metric">
         <strong>${escapeHtml(device.current_version)}</strong>
-        <small>当前版本 · ${escapeHtml(device.current_build || "无构建号")}</small>
+        <small>构建 ${escapeHtml(device.current_build || "未报告")} · Base ${escapeHtml(device.base_version || "未报告")}</small>
       </div>
       <div class="metric">
         <span class="badge ${device.version_matches ? "badge-ok" : "badge-pending"}">${device.version_matches ? "版本一致" : "等待切换"}</span>
@@ -105,7 +106,7 @@ function renderDevices() {
       </div>
       <div class="metric">
         <strong>${device.rssi == null ? "—" : `${device.rssi} dBm`}</strong>
-        <small>${formatBytes(device.free_heap)} heap · ${escapeHtml(device.status)}</small>
+        <small>${escapeHtml(device.wifi_ssid || "未报告 Wi-Fi")} · IP ${escapeHtml(device.local_ip || "未报告")} · ${formatBytes(device.free_heap)} heap · ${escapeHtml(device.status)}</small>
       </div>
       <div class="target-control">
         <select aria-label="目标版本">${releaseOptions(device)}</select>
@@ -258,4 +259,4 @@ $("#release-form").addEventListener("submit", async (event) => {
 refresh();
 window.setInterval(() => {
   if (!document.activeElement?.matches(".alias-input")) refresh();
-}, 30_000);
+}, REFRESH_INTERVAL_MS);

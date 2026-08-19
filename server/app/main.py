@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import os
 import re
 import secrets
@@ -27,6 +28,7 @@ from pydantic import BaseModel
 
 from .config import settings
 from .db import connect, init_db, utc_now
+from .debug_ota import load_debug_target
 from .versioning import (
     ota_action,
     parse_version,
@@ -38,6 +40,7 @@ from .versioning import (
 STATIC_DIR = Path(__file__).parent / "static"
 BUILD_PATTERN = re.compile(r"^[0-9A-Za-z._-]{1,64}$")
 STATUS_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+HEARTBEAT_INTERVAL_SECONDS = 20
 
 
 @asynccontextmanager
@@ -111,22 +114,32 @@ def heartbeat(
     model: str,
     device_id: str,
     version: Annotated[str, Query(alias="v")],
+    base_version: Annotated[str | None, Query(alias="base", max_length=64)] = None,
     build: Annotated[str | None, Query(max_length=64)] = None,
     uptime: Annotated[int | None, Query(ge=0)] = None,
     device_status: Annotated[str, Query(alias="status")] = "ok",
     rssi: Annotated[int | None, Query(ge=-127, le=20)] = None,
+    wifi_ssid: Annotated[str | None, Query(max_length=32)] = None,
+    local_ip: Annotated[str | None, Query(max_length=45)] = None,
     heap: Annotated[int | None, Query(ge=0)] = None,
     reset: Annotated[str | None, Query(max_length=32)] = None,
     ota: Annotated[str, Query()] = "idle",
 ) -> dict[str, object]:
     model, device_id = validated_identity(model, device_id)
     version = validated_version(version)
+    if base_version is not None:
+        base_version = validated_version(base_version)
     device_status = validate_runtime_value(device_status, "status")
     ota = validate_runtime_value(ota, "ota status")
     if build is not None and not BUILD_PATTERN.fullmatch(build):
         raise HTTPException(status_code=422, detail="invalid build")
     if reset is not None and not STATUS_PATTERN.fullmatch(reset):
         raise HTTPException(status_code=422, detail="invalid reset reason")
+    if local_ip is not None:
+        try:
+            local_ip = str(ipaddress.ip_address(local_ip))
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail="invalid local IP") from error
 
     now = utc_now()
     remote_ip = request.client.host if request.client else None
@@ -134,17 +147,21 @@ def heartbeat(
         database.execute(
             """
             INSERT INTO devices (
-                model, device_id, current_version, current_build, status, ota_status,
-                uptime_seconds, rssi, free_heap, reset_reason, remote_ip,
+                model, device_id, current_version, current_build, base_version,
+                status, ota_status,
+                uptime_seconds, rssi, wifi_ssid, local_ip, free_heap, reset_reason, remote_ip,
                 first_seen, last_seen
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(model, device_id) DO UPDATE SET
                 current_version = excluded.current_version,
                 current_build = excluded.current_build,
+                base_version = excluded.base_version,
                 status = excluded.status,
                 ota_status = excluded.ota_status,
                 uptime_seconds = excluded.uptime_seconds,
                 rssi = excluded.rssi,
+                wifi_ssid = excluded.wifi_ssid,
+                local_ip = excluded.local_ip,
                 free_heap = excluded.free_heap,
                 reset_reason = excluded.reset_reason,
                 remote_ip = excluded.remote_ip,
@@ -155,10 +172,13 @@ def heartbeat(
                 device_id,
                 version,
                 build,
+                base_version,
                 device_status,
                 ota,
                 uptime,
                 rssi,
+                wifi_ssid,
+                local_ip,
                 heap,
                 reset,
                 remote_ip,
@@ -169,19 +189,23 @@ def heartbeat(
         database.execute(
             """
             INSERT INTO heartbeats (
-                model, device_id, version, build, status, ota_status,
-                uptime_seconds, rssi, free_heap, reset_reason, remote_ip, received_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                model, device_id, version, build, base_version, status, ota_status,
+                uptime_seconds, rssi, wifi_ssid, local_ip, free_heap, reset_reason, remote_ip,
+                received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 model,
                 device_id,
                 version,
                 build,
+                base_version,
                 device_status,
                 ota,
                 uptime,
                 rssi,
+                wifi_ssid,
+                local_ip,
                 heap,
                 reset,
                 remote_ip,
@@ -204,18 +228,31 @@ def heartbeat(
                 (model, target_version),
             ).fetchone()
 
-    action = ota_action(version, target_version)
-    if action != "none" and release is None:
-        action = "none"
-        target_version = None
+    debug_target = load_debug_target(settings.data_dir, model, device_id)
+    if debug_target is not None:
+        target_version = debug_target.version
+        action = ota_action(version, target_version)
+        ota_url = (
+            f"{settings.public_base_url}/{model}/{device_id}/debug-bin/{target_version}"
+        )
+        firmware_size = debug_target.firmware_size
+        firmware_sha256 = debug_target.firmware_sha256
+    else:
+        action = ota_action(version, target_version)
+        if action != "none" and release is None:
+            action = "none"
+            target_version = None
 
-    ota_url = None
-    firmware_size = None
-    firmware_sha256 = None
-    if action != "none" and release is not None:
-        ota_url = f"{settings.public_base_url}/{model}/{device_id}/bin/{target_version}"
-        firmware_size = release["file_size"]
-        firmware_sha256 = release["sha256"]
+        ota_url = None
+        firmware_size = None
+        firmware_sha256 = None
+        if action != "none" and release is not None:
+            ota_url = f"{settings.public_base_url}/{model}/{device_id}/bin/{target_version}"
+            firmware_size = release["file_size"]
+            firmware_sha256 = release["sha256"]
+
+    if action == "none":
+        ota_url = None
 
     return {
         "ok": True,
@@ -226,8 +263,29 @@ def heartbeat(
         "ota_url": ota_url,
         "firmware_size": firmware_size,
         "firmware_sha256": firmware_sha256,
-        "heartbeat_interval": 60,
+        "heartbeat_interval": HEARTBEAT_INTERVAL_SECONDS,
     }
+
+
+@app.get("/{model}/{device_id}/debug-bin/{version}")
+def download_debug_firmware(model: str, device_id: str, version: str) -> FileResponse:
+    model, device_id = validated_identity(model, device_id)
+    version = validated_version(version)
+    target = load_debug_target(settings.data_dir, model, device_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="debug firmware not found")
+    if target.version != version:
+        raise HTTPException(status_code=403, detail="debug version is not assigned")
+    return FileResponse(
+        target.firmware_path,
+        media_type="application/octet-stream",
+        filename=f"{model}-{version}-debug.bin",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Firmware-Version": version,
+            "X-Firmware-SHA256": target.firmware_sha256,
+        },
+    )
 
 
 @app.get("/{model}/{device_id}/bin/{version}")

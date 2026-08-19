@@ -1,6 +1,6 @@
 # ESP32 OTA 规则
 
-最后更新：2026-08-06
+最后更新：2026-08-19
 
 本文档是本项目所有 ESP32 板卡共同遵守的 OTA 协议规则。
 
@@ -9,10 +9,12 @@
 - 每台设备由“板子型号”和“板子唯一 ID”共同标识。
 - 板子型号使用稳定的小写 slug，例如：
   - `esp32-s3-supermini`
+  - `esp32-s3-n16r8`
   - `esp32-c3-supermini`
   - `esp32-c6-supermini`
 - 板子唯一 ID 使用芯片的 eFuse Factory MAC：去掉冒号并转换为小写十六进制。
 - 当前 ESP32-S3 Super Mini 的唯一 ID 为 `2884856b37c8`。
+- 当前 ESP32-S3 N16R8 的唯一 ID 为 `28848554e684`。
 
 ## 2. URL 规则
 
@@ -53,10 +55,13 @@ https://ota.hwaipy.cn/esp32-s3-supermini/2884856b37c8/hb
 | 参数 | 必填 | 含义 |
 | --- | --- | --- |
 | `v` | 是 | 当前语义版本号，例如 `0.1.2` |
+| `base` | 否 | 编译进当前固件的 base 源码版本，例如 `0.4.1` |
 | `build` | 否 | 构建编号 |
 | `uptime` | 否 | 启动至今的秒数 |
 | `status` | 否 | 运行状态，默认 `ok` |
 | `rssi` | 否 | Wi-Fi RSSI，单位 dBm |
+| `wifi_ssid` | 否 | 当前连接的 Wi-Fi SSID，UTF-8 URL 编码，最长 32 个字符 |
+| `local_ip` | 否 | 板卡在当前 Wi-Fi 网络中的本地 IP 地址 |
 | `heap` | 否 | 当前空闲堆字节数 |
 | `reset` | 否 | 最近一次复位原因 |
 | `ota` | 否 | OTA 状态，默认 `idle` |
@@ -103,7 +108,7 @@ https://ota.hwaipy.cn/manage
   "ota_url": "https://ota.hwaipy.cn/esp32-s3-supermini/2884856b37c8/bin/0.1.1",
     "firmware_size": 895344,
     "firmware_sha256": "bebdf24de3a6272e3961f4cee80ef60f2fa506b09d47bc0a128879f4a3af2865",
-  "heartbeat_interval": 60
+  "heartbeat_interval": 20
 }
 ```
 
