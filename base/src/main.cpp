@@ -227,7 +227,9 @@ void confirmRunningImage() {
 bool loadNetworkCredentials(NetworkCredential *networks, size_t &networkCount) {
   networkCount = 0;
   Preferences preferences;
-  if (!preferences.begin("hwaipy-net", true)) {
+  // Open read-write so a factory-fresh device gets an empty namespace instead
+  // of logging NVS_NOT_FOUND on every connection attempt.
+  if (!preferences.begin("hwaipy-net", false)) {
     return false;
   }
 
