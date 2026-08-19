@@ -27,14 +27,14 @@ namespace {
 #define HWAIPY_FIRMWARE_NAME "Hwaipy ESP32 OTA base"
 #endif
 
-#define HWAIPY_BASE_VERSION "0.4.1"
+#define HWAIPY_BASE_VERSION "0.4.2"
 
 #ifndef HWAIPY_FIRMWARE_VERSION
 #define HWAIPY_FIRMWARE_VERSION HWAIPY_BASE_VERSION
 #endif
 
 #ifndef HWAIPY_FIRMWARE_BUILD
-#define HWAIPY_FIRMWARE_BUILD "20260819.2"
+#define HWAIPY_FIRMWARE_BUILD "20260819.3"
 #endif
 
 #ifndef HWAIPY_APP_SETUP
@@ -42,7 +42,10 @@ namespace {
 #endif
 
 #if CONFIG_IDF_TARGET_ESP32S3
-constexpr char DEVICE_MODEL[] = "esp32-s3-supermini";
+#ifndef HWAIPY_DEVICE_MODEL
+#define HWAIPY_DEVICE_MODEL "esp32-s3-supermini"
+#endif
+constexpr char DEVICE_MODEL[] = HWAIPY_DEVICE_MODEL;
 #define HWAIPY_BOARD_HAS_PSRAM 1
 #elif CONFIG_IDF_TARGET_ESP32C3
 constexpr char DEVICE_MODEL[] = "esp32-c3-supermini";

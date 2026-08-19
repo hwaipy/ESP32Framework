@@ -24,8 +24,8 @@
 void startAudioStreamClient();
 
 #define HWAIPY_FIRMWARE_NAME "Hwaipy ESP32 Audio Recorder"
-#define HWAIPY_FIRMWARE_VERSION "audio_recorder_1.0.2"
-#define HWAIPY_FIRMWARE_BUILD "20260819.2"
+#define HWAIPY_FIRMWARE_VERSION "audio_recorder_1.0.3"
+#define HWAIPY_FIRMWARE_BUILD "20260819.3"
 #define HWAIPY_APP_SETUP() startAudioStreamClient()
 
 #include "../../../base/src/main.cpp"

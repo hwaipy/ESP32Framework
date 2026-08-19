@@ -12,8 +12,8 @@
 void startSignalGenerator();
 
 #define HWAIPY_FIRMWARE_NAME "Hwaipy SignalGenerator"
-#define HWAIPY_FIRMWARE_VERSION "signal_generator_0.1.2"
-#define HWAIPY_FIRMWARE_BUILD "20260819.2"
+#define HWAIPY_FIRMWARE_VERSION "signal_generator_0.1.3"
+#define HWAIPY_FIRMWARE_BUILD "20260819.3"
 #define HWAIPY_APP_SETUP() startSignalGenerator()
 
 // SignalGenerator inherits the shared board detection, Wi-Fi provisioning,

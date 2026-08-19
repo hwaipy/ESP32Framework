@@ -7,6 +7,7 @@
 - `base/`：三种板型共用的 PlatformIO/Arduino OTA 基础程序。
 - `app/`：从 `base` 派生的具体设备应用。
 - `app/SignalGenerator/`：信号发生器固件，复用 base 的 OTA 能力。
+- `app/Recorder/`：ESP32-S3 USB 麦克风实时录音固件。
 - `server/`：FastAPI OTA 服务端源码、部署配置和测试。
 - `base/OTA_RULES.md`：所有板型共同遵守的 OTA 协议。
 - `AGENTS.md`：源码目录与外部构建目录的强制约定。
@@ -21,9 +22,9 @@ Google Drive 项目目录只保存源码。PlatformIO 编译产物、下载依�
 
 ## Base 固件
 
-当前公共源码版本：`0.4.1`，构建号：`20260819.2`。
+当前公共源码版本：`0.4.2`，构建号：`20260819.3`。
 
-一次编译三个板型：
+一次编译四种硬件配置：
 
 ```bash
 cd base
@@ -34,6 +35,7 @@ cd base
 
 ```bash
 ~/.platformio/penv/bin/pio run -e esp32-s3-supermini
+~/.platformio/penv/bin/pio run -e esp32-s3-n16r8
 ~/.platformio/penv/bin/pio run -e esp32-c3-supermini
 ~/.platformio/penv/bin/pio run -e esp32-c6-supermini
 ```
@@ -42,6 +44,7 @@ cd base
 
 ```text
 /Users/hwaipy/Documents/PlatformIO/ESP32Framework/base/build/esp32-s3-supermini/firmware.bin
+/Users/hwaipy/Documents/PlatformIO/ESP32Framework/base/build/esp32-s3-n16r8/firmware.bin
 /Users/hwaipy/Documents/PlatformIO/ESP32Framework/base/build/esp32-c3-supermini/firmware.bin
 /Users/hwaipy/Documents/PlatformIO/ESP32Framework/base/build/esp32-c6-supermini/firmware.bin
 ```
@@ -54,7 +57,7 @@ GitHub Release 中的 `factory.bin` 是包含 bootloader、分区表、OTA 数�
 保存 Wi-Fi 凭据。执行前把 Wi-Fi 占位符替换为实际值：
 
 ```bash
-VERSION=0.4.1; BOARD=esp32-s3-supermini; CHIP=esp32s3; export WIFI_SSID='YOUR_WIFI_SSID' WIFI_PASSWORD='YOUR_WIFI_PASSWORD'; curl -LsSf https://astral.sh/uv/install.sh | sh && curl -fL "https://github.com/hwaipy/ESP32Framework/releases/download/base-v${VERSION}/ESP32Framework-base-${VERSION}-${BOARD}-factory.bin" -o /tmp/esp32-factory.bin && ~/.local/bin/uvx --from esptool==5.3.0 esptool --chip "$CHIP" write-flash 0x0 /tmp/esp32-factory.bin && sleep 4 && ~/.local/bin/uv run --with pyserial python -c 'import json,os,time,serial; from serial.tools import list_ports; ports=[p.device for p in list_ports.comports() if p.vid is not None or any(x in p.device.lower() for x in ("usbmodem","usbserial","ttyacm","ttyusb"))]; assert ports,"未找到 ESP32 串口"; s=serial.Serial(ports[0],115200,timeout=0.2,write_timeout=2); time.sleep(3); s.reset_input_buffer(); command="wifi "+json.dumps({"ssid":os.environ["WIFI_SSID"],"password":os.environ["WIFI_PASSWORD"]},ensure_ascii=False)+"\n"; s.write(command.encode("utf-8")); s.flush(); time.sleep(6); out=s.read_all(); print(out.decode("utf-8","replace")); assert b"credentials saved" in out,"Wi-Fi 配置未确认保存，请重新执行串口配置"'
+VERSION=0.4.2; BOARD=esp32-s3-supermini; CHIP=esp32s3; export WIFI_SSID='YOUR_WIFI_SSID' WIFI_PASSWORD='YOUR_WIFI_PASSWORD'; curl -LsSf https://astral.sh/uv/install.sh | sh && curl -fL "https://github.com/hwaipy/ESP32Framework/releases/download/base-v${VERSION}/ESP32Framework-base-${VERSION}-${BOARD}-factory.bin" -o /tmp/esp32-factory.bin && ~/.local/bin/uvx --from esptool==5.3.0 esptool --chip "$CHIP" write-flash 0x0 /tmp/esp32-factory.bin && sleep 4 && ~/.local/bin/uv run --with pyserial python -c 'import json,os,time,serial; from serial.tools import list_ports; ports=[p.device for p in list_ports.comports() if p.vid is not None or any(x in p.device.lower() for x in ("usbmodem","usbserial","ttyacm","ttyusb"))]; assert ports,"未找到 ESP32 串口"; s=serial.Serial(ports[0],115200,timeout=0.2,write_timeout=2); time.sleep(3); s.reset_input_buffer(); command="wifi "+json.dumps({"ssid":os.environ["WIFI_SSID"],"password":os.environ["WIFI_PASSWORD"]},ensure_ascii=False)+"\n"; s.write(command.encode("utf-8")); s.flush(); time.sleep(6); out=s.read_all(); print(out.decode("utf-8","replace")); assert b"credentials saved" in out,"Wi-Fi 配置未确认保存，请重新执行串口配置"'
 ```
 
 上例用于 ESP32-S3 Super Mini。其他板型只需替换命令开头的参数：
@@ -62,6 +65,7 @@ VERSION=0.4.1; BOARD=esp32-s3-supermini; CHIP=esp32s3; export WIFI_SSID='YOUR_WI
 ```text
 ESP32-C3 Super Mini: BOARD=esp32-c3-supermini; CHIP=esp32c3
 ESP32-C6 Super Mini: BOARD=esp32-c6-supermini; CHIP=esp32c6
+ESP32-S3 N16R8: BOARD=esp32-s3-n16r8; CHIP=esp32s3
 ```
 
 三种芯片的固件不能交叉烧写。计算机同时连接多个 USB 串口设备时，应先断开无关
@@ -97,7 +101,8 @@ Wi-Fi 凭据保存在 ESP32 NVS，不写入源码，也不会因普通 OTA 更�
 设备状态和心跳历史，并在管理页中显示。App 只需声明自己的固件版本，base 版本由
 `base/src/main.cpp` 自动提供，不需要在每个 app 中重复填写。
 
-S3 Super Mini 会检测预期的 2 MB PSRAM；C3、C6 没有 PSRAM 属于正常情况，不会导致自检失败。
+S3 Super Mini 会检测预期的 2 MB QSPI PSRAM；S3 N16R8 使用 16 MB Flash
+和 8 MB OPI PSRAM；C3、C6 没有 PSRAM 属于正常情况，不会导致自检失败。
 
 ## 已验证设备
 
@@ -111,11 +116,12 @@ S3 Super Mini 会检测预期的 2 MB PSRAM；C3、C6 没有 PSRAM 属于正常�
 `0.3.0` 增加有序多 Wi-Fi 配置，目前尚未发布。
 `0.4.0` 增加心跳本地 IP 上报和 OTA 管理页网络信息展示，已完成三板型编译验证并发布为 GitHub Release `base-v0.4.0`。
 `0.4.1` 将 USB CDC 日志改为非阻塞并降低 OTA 进度输出频率，避免未打开串口时阻塞 OTA 下载；已完成三板型编译验证并发布为 GitHub Release `base-v0.4.1`。
+`0.4.2` 增加 `esp32-s3-n16r8`（16 MB Flash、8 MB OPI PSRAM）支持。
 
 ## SignalGenerator 固件
 
-当前应用版本：`signal_generator_0.1.2`，构建号：`20260819.2`，内嵌 base
-`0.4.1`。
+当前应用版本：`signal_generator_0.1.3`，构建号：`20260819.3`，内嵌 base
+`0.4.2`。
 
 ```bash
 cd app/SignalGenerator
@@ -123,7 +129,7 @@ cd app/SignalGenerator
 ```
 
 该应用以轻量入口复用 `base/src/main.cpp`，具备 base 的设备自检、Wi-Fi 配置、
-心跳和 OTA 能力。三个板型上无启动、存储、USB、调试或串口职责的安全 GPIO
+心跳和 OTA 能力。四种硬件配置上无启动、存储、USB、调试或串口职责的安全 GPIO
 同步输出 10 ms 周期脉冲，其中高电平持续 1 ms、低电平持续 9 ms。
 
 ## 服务端

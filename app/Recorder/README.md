@@ -1,6 +1,6 @@
 # Hwaipy ESP32 Audio Recorder
 
-ESP32-S3 Super Mini USB 麦克风实时录音客户端。固件以 USB Host 模式驱动
+ESP32-S3 Super Mini 与 ESP32-S3 N16R8 USB 麦克风实时录音客户端。固件以 USB Host 模式驱动
 UAC 1.0 麦克风，采集 48 kHz、16-bit、单声道 PCM，并以 100 ms 帧接入
 `audio-stream` 的 `RSPAUDIO1` 兼容协议：
 
@@ -15,11 +15,12 @@ UAC 1.0 麦克风，采集 48 kHz、16-bit、单声道 PCM，并以 100 ms 帧�
 此版本不在 4 MB flash 上实现 Pi 客户端的持久 Opus spool，断电或长时间断网期间的
 音频无法补传。复制到其他板子时必须为其分配不同的可读设备代号。
 
-当前正式版本为 `audio_recorder_1.0.2`（构建号 `20260819.2`），内嵌 base
-`0.4.1`。正式固件不向
+当前正式版本为 `audio_recorder_1.0.3`（构建号 `20260819.3`），内嵌 base
+`0.4.2`。正式固件不向
 临时调试接收端口发送遥测；后续开发版本继续使用 OTA 服务的 `data/debug/`
 隔离通道，不覆盖正式发布。
 
 ```bash
 ~/.platformio/penv/bin/pio run -e esp32-s3-supermini
+~/.platformio/penv/bin/pio run -e esp32-s3-n16r8
 ```

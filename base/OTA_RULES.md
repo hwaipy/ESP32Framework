@@ -1,6 +1,6 @@
 # ESP32 OTA 规则
 
-最后更新：2026-08-06
+最后更新：2026-08-19
 
 本文档是本项目所有 ESP32 板卡共同遵守的 OTA 协议规则。
 
@@ -9,10 +9,12 @@
 - 每台设备由“板子型号”和“板子唯一 ID”共同标识。
 - 板子型号使用稳定的小写 slug，例如：
   - `esp32-s3-supermini`
+  - `esp32-s3-n16r8`
   - `esp32-c3-supermini`
   - `esp32-c6-supermini`
 - 板子唯一 ID 使用芯片的 eFuse Factory MAC：去掉冒号并转换为小写十六进制。
 - 当前 ESP32-S3 Super Mini 的唯一 ID 为 `2884856b37c8`。
+- 当前 ESP32-S3 N16R8 的唯一 ID 为 `28848554e684`。
 
 ## 2. URL 规则
 
