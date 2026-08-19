@@ -7,6 +7,7 @@
 #include <WiFiClient.h>
 #include <WiFiClientSecure.h>
 #include <esp_heap_caps.h>
+#include <esp_err.h>
 #include <esp_intr_alloc.h>
 #include <esp_random.h>
 #include <freertos/FreeRTOS.h>
@@ -24,8 +25,8 @@
 void startAudioStreamClient();
 
 #define HWAIPY_FIRMWARE_NAME "Hwaipy ESP32 Audio Recorder"
-#define HWAIPY_FIRMWARE_VERSION "audio_recorder_1.0.3"
-#define HWAIPY_FIRMWARE_BUILD "20260819.3"
+#define HWAIPY_FIRMWARE_VERSION "audio_recorder_1.0.4"
+#define HWAIPY_FIRMWARE_BUILD "20260819.4"
 #define HWAIPY_APP_SETUP() startAudioStreamClient()
 
 #include "../../../base/src/main.cpp"
@@ -53,6 +54,7 @@ constexpr uint16_t INVALID_FRAME_INDEX = UINT16_MAX;
 constexpr uint32_t UPLOAD_WINDOW_FRAMES = 20;
 constexpr uint32_t ACK_TIMEOUT_MS = 5000;
 constexpr uint32_t RECONNECT_DELAY_MS = 2000;
+constexpr uint32_t DIAGNOSTIC_INTERVAL_MS = 10000;
 constexpr uint64_t FRAME_DURATION_NS =
     static_cast<uint64_t>(FRAME_DURATION_MS) * 1000000ULL;
 constexpr int64_t WALL_CLOCK_STEP_NS = 2000000000LL;
@@ -110,6 +112,8 @@ volatile uint32_t framesSent = 0;
 volatile uint32_t framesDropped = 0;
 volatile uint32_t transferErrors = 0;
 volatile uint32_t reconnectCount = 0;
+volatile uint32_t audioConnectFailures = 0;
+volatile uint32_t audioHandshakeFailures = 0;
 volatile uint32_t clockStepCount = 0;
 volatile uint64_t acknowledgedBytes = 0;
 volatile uint64_t sentBytes = 0;
@@ -250,10 +254,16 @@ bool findMicrophoneFormat(uac_host_device_handle_t handle,
   return false;
 }
 
-bool usbEnumerationFilter(const usb_device_desc_t *,
+bool usbEnumerationFilter(const usb_device_desc_t *descriptor,
                           uint8_t *configurationValue) {
   enumFilterCalled = true;
   *configurationValue = 1;
+  if (descriptor != nullptr) {
+    Serial.printf(
+        "USB device detected : VID=%04x PID=%04x class=%02x config=%u\n",
+        descriptor->idVendor, descriptor->idProduct,
+        descriptor->bDeviceClass, *configurationValue);
+  }
   return true;
 }
 
@@ -371,8 +381,11 @@ void handleMicrophoneData() {
 
 void handleMicrophoneConnected(uint8_t address, uint8_t interfaceNumber) {
   if (microphoneHandle != nullptr) {
+    Serial.println("UAC connect ignored : microphone already active");
     return;
   }
+  Serial.printf("UAC connect event   : address=%u interface=%u\n", address,
+                interfaceNumber);
   const uac_host_device_config_t deviceConfig = {
       .addr = address,
       .iface_num = interfaceNumber,
@@ -384,13 +397,17 @@ void handleMicrophoneConnected(uint8_t address, uint8_t interfaceNumber) {
   uac_host_device_handle_t handle = nullptr;
   esp_err_t result = uac_host_device_open(&deviceConfig, &handle);
   if (result != ESP_OK) {
+    Serial.printf("UAC device open     : %s\n", esp_err_to_name(result));
     return;
   }
   uac_host_dev_alt_param_t format = {};
   if (!findMicrophoneFormat(handle, format)) {
+    Serial.println("UAC format          : no compatible 48kHz/16-bit/mono input");
     uac_host_device_close(handle);
     return;
   }
+  Serial.printf("UAC microphone      : VID=%04x PID=%04x, 48kHz/16-bit/mono\n",
+                microphoneVid, microphonePid);
   const uac_host_stream_config_t streamConfig = {
       .channels = CHANNELS,
       .bit_resolution = BITS_PER_SAMPLE,
@@ -399,6 +416,7 @@ void handleMicrophoneConnected(uint8_t address, uint8_t interfaceNumber) {
   };
   result = uac_host_device_start(handle, &streamConfig);
   if (result != ESP_OK) {
+    Serial.printf("UAC stream start    : %s\n", esp_err_to_name(result));
     uac_host_device_close(handle);
     return;
   }
@@ -407,10 +425,14 @@ void handleMicrophoneConnected(uint8_t address, uint8_t interfaceNumber) {
   microphoneHandle = handle;
   microphoneConnected = true;
   xSemaphoreGive(microphoneMutex);
-  applyMicrophoneControl(actualGain, actualAgc);
+  const bool controlsApplied = applyMicrophoneControl(actualGain, actualAgc);
+  Serial.printf("UAC stream ready    : gain=%u AGC=%s controls=%s\n", actualGain,
+                actualAgc ? "on" : "off", controlsApplied ? "ok" : "failed");
 }
 
 void handleMicrophoneDisconnected(uac_host_device_handle_t handle) {
+  Serial.printf("UAC disconnected    : VID=%04x PID=%04x\n", microphoneVid,
+                microphonePid);
   xSemaphoreTake(microphoneMutex, portMAX_DELAY);
   if (handle == microphoneHandle) {
     microphoneHandle = nullptr;
@@ -430,11 +452,15 @@ void usbLibraryTask(void *argument) {
       .enum_filter_cb = usbEnumerationFilter,
   };
   usbInstallResult = usb_host_install(&config);
+  Serial.printf("USB host install    : %s\n",
+                esp_err_to_name(static_cast<esp_err_t>(usbInstallResult)));
   if (usbInstallResult != ESP_OK) {
     vTaskDelete(nullptr);
     return;
   }
   rootPortPowerResult = usb_host_lib_set_root_port_power(true);
+  Serial.printf("USB root port power : %s\n",
+                esp_err_to_name(static_cast<esp_err_t>(rootPortPowerResult)));
   xTaskNotifyGive(static_cast<TaskHandle_t>(argument));
   while (true) {
     uint32_t flags = 0;
@@ -453,6 +479,8 @@ void uacEventTask(void *) {
       .callback_arg = nullptr,
   };
   uacInstallResult = uac_host_install(&config);
+  Serial.printf("UAC driver install  : %s\n",
+                esp_err_to_name(static_cast<esp_err_t>(uacInstallResult)));
   if (uacInstallResult != ESP_OK) {
     vTaskDelete(nullptr);
     return;
@@ -475,6 +503,10 @@ void uacEventTask(void *) {
         break;
       case UAC_HOST_DEVICE_EVENT_TRANSFER_ERROR:
         ++transferErrors;
+        if (transferErrors == 1 || transferErrors % 32 == 0) {
+          Serial.printf("UAC transfer errors : %lu\n",
+                        static_cast<unsigned long>(transferErrors));
+        }
         break;
       case UAC_HOST_DRIVER_EVENT_DISCONNECTED:
         handleMicrophoneDisconnected(event.device.handle);
@@ -573,6 +605,11 @@ bool openAudioConnection(WiFiClient &client, uint64_t &ackedOffset,
   client.setTimeout(ACK_TIMEOUT_MS);
   client.setNoDelay(true);
   if (!client.connect(AUDIO_HOST, AUDIO_PORT, ACK_TIMEOUT_MS)) {
+    ++audioConnectFailures;
+    if (audioConnectFailures == 1 || audioConnectFailures % 15 == 0) {
+      Serial.printf("Audio server connect: failed (%lu attempts)\n",
+                    static_cast<unsigned long>(audioConnectFailures));
+    }
     return false;
   }
   JsonDocument helloDocument;
@@ -592,11 +629,15 @@ bool openAudioConnection(WiFiClient &client, uint64_t &ackedOffset,
                 sizeof(PROTOCOL_MAGIC) - 1U) ||
       !writeAll(client, reinterpret_cast<const uint8_t *>(hello.c_str()),
                 hello.length())) {
+    ++audioHandshakeFailures;
+    Serial.println("Audio server hello  : write failed");
     client.stop();
     return false;
   }
   uint8_t ack[ACK_BYTES];
   if (!readExact(client, ack, sizeof(ack), ACK_TIMEOUT_MS)) {
+    ++audioHandshakeFailures;
+    Serial.println("Audio server hello  : ACK timeout");
     client.stop();
     return false;
   }
@@ -607,12 +648,16 @@ bool openAudioConnection(WiFiClient &client, uint64_t &ackedOffset,
   if (!processAck(client, ack, sentOffset, ackedOffset, appliedGeneration,
                   lastControlAttemptAt) ||
       ackedOffset != 0) {
+    ++audioHandshakeFailures;
+    Serial.println("Audio server hello  : invalid ACK");
     client.stop();
     return false;
   }
   acknowledgedBytes = 0;
   sentBytes = 0;
   streamConnected = true;
+  Serial.printf("Audio stream online : %s -> %s:%u\n", streamDeviceId.c_str(),
+                AUDIO_HOST, AUDIO_PORT);
   return true;
 }
 
@@ -625,7 +670,23 @@ void audioStreamTask(void *) {
   uint32_t appliedGeneration = UINT32_MAX;
   uint32_t lastControlAttemptAt = 0;
   uint32_t lastAckAt = 0;
+  uint32_t lastDiagnosticAt = millis() - DIAGNOSTIC_INTERVAL_MS;
   while (true) {
+    if (millis() - lastDiagnosticAt >= DIAGNOSTIC_INTERVAL_MS) {
+      lastDiagnosticAt = millis();
+      Serial.printf(
+          "Recorder status     : mic=%s stream=%s enum=%s frames=%lu/%lu "
+          "dropped=%lu reconnects=%lu connect_fail=%lu handshake_fail=%lu\n",
+          microphoneConnected ? "ready" : "waiting",
+          streamConnected ? "online" : "offline",
+          enumFilterCalled ? "seen" : "none",
+          static_cast<unsigned long>(framesCaptured),
+          static_cast<unsigned long>(framesSent),
+          static_cast<unsigned long>(framesDropped),
+          static_cast<unsigned long>(reconnectCount),
+          static_cast<unsigned long>(audioConnectFailures),
+          static_cast<unsigned long>(audioHandshakeFailures));
+    }
     if (WiFi.status() != WL_CONNECTED || !microphoneConnected ||
         realtimeNs() == 0) {
       if (client.connected()) {
@@ -706,7 +767,7 @@ void startAudioStreamClient() {
 #error "Audio Stream Client requires ESP32-S3 USB OTG support"
 #endif
   loadSavedControls();
-  streamDeviceId = "S3-0001";
+  streamDeviceId = "ESP32-" + deviceId;
   framePool = static_cast<AudioFrame *>(heap_caps_calloc(
       FRAME_POOL_COUNT, sizeof(AudioFrame), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   eventQueue = xQueueCreate(16, sizeof(RecorderEvent));
